@@ -1,5 +1,5 @@
 # build
-FROM golang:1.21-alpine AS build
+FROM golang:1.24.0-alpine AS build
 
 # Install git (required for go mod download)
 RUN apk add --no-cache git ca-certificates

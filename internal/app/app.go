@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
+	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -15,6 +15,11 @@ type App struct {
 	Config *Config
 	Logger *log.Logger
 	DB     *pgxpool.Pool
+}
+
+// NewStdLogger returns a simple standard library logger writing to stdout.
+func NewStdLogger() *log.Logger {
+	return log.New(os.Stdout, "", log.LstdFlags)
 }
 
 // New creates a fully initialized App instance.

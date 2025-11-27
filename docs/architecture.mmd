@@ -1,0 +1,53 @@
+%% docs/architecture.mmd
+flowchart LR
+  subgraph Users
+    A[User / Client<br/>(Browser / Mobile / CLI)]
+  end
+
+  subgraph ClusterOrHost
+    direction TB
+
+    Ingress[Ingress / API Gateway<br/Optional TLS, Rate-limit]
+    LB[Service (ClusterIP) / LoadBalancer]
+
+    subgraph AppPlane [Application Plane]
+      API[library-api (HTTP Server)]
+      Auth[Auth Middleware / JWT]
+      Handlers[HTTP Handlers<br/ (books, bookings, users, auth)]
+      Services[Service Layer<br/Business Logic]
+      Repo[Repo Layer<br/DB Access (pgx)]
+    end
+
+    subgraph DataPlane [Data & State]
+      Postgres[(Postgres DB)]
+      Migrations["internal/migrate/*.sql"]
+      (OptionalRedis)[(Optional Redis Cache)]
+    end
+
+    subgraph Infra [Infra & DevOps]
+      Docker[Docker Image / CI]
+      Compose[Docker Compose (dev)]
+      K8s[Kubernetes manifests (k8s/)]
+      SecretsStore[Secrets Manager / CSI / Vault]
+      CI[CI Pipeline (.github/workflows/ci.yml)]
+      Monitoring[Metrics / Traces / Logging]
+    end
+  end
+
+  A -->|HTTPS| Ingress
+  Ingress --> LB
+  LB --> API
+  API --> Auth
+  Auth --> Handlers
+  Handlers --> Services
+  Services --> Repo
+  Repo --> Postgres
+  Migrations --> Postgres
+  Services -->|optional cache| (OptionalRedis)
+
+  Docker --> API
+  Compose -->|dev infra| Postgres & API
+  K8s --> API & Postgres
+  SecretsStore -->|mount secrets| API
+  CI --> Docker
+  API --> Monitoring

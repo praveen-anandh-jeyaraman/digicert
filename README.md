@@ -18,7 +18,33 @@ A RESTful API for managing books, users, and borrowing system. Built with Go, Po
 - **Graceful Shutdown**
 
 ---
-
+- **Architecture**
+[User Client] --> [Ingress / API Gateway] --> [library-api (HTTP server)]
+                                                  |
+                                                  v
+                                       +----------------------+
+                                       |  HTTP Handlers       |
+                                       |  (books, bookings,   |
+                                       |   users, auth)       |
+                                       +----------------------+
+                                                  |
+                                                  v
+                                       +----------------------+
+                                       |  Service Layer       |
+                                       |  (business logic,    |
+                                       |   validation, rules) |
+                                       +----------------------+
+                                                  |
+                                                  v
+                                       +----------------------+
+                                       |  Repo Layer (pgx)    |
+                                       |  (books, users,      |
+                                       |   bookings repos)    |
+                                       +----------------------+
+                                                  |
+                                                  v
+                                          [Postgres DB]
+                                          (migrations run at deploy)
 ## Deployment
 
 ### EC2 Instance

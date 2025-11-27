@@ -29,7 +29,9 @@ func (m *mockAuthService) GenerateToken(userID, username, role string) (string, 
 func (m *mockAuthService) ValidateToken(token string) (map[string]interface{}, error) {
     return m.validateFn(token)
 }
-
+func (m *mockUserServiceForAuth) RegisterAdmin(ctx context.Context, req *model.RegisterRequest) (*model.User, error) {
+    return &model.User{Username: req.Username, Email: req.Email, Role: "admin"}, nil
+}
 // Mock user service
 type mockUserServiceForAuth struct {
     registerFn      func(ctx context.Context, req *model.RegisterRequest) (*model.User, error)

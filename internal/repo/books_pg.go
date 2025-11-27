@@ -83,6 +83,10 @@ func (r *pgBookRepo) Update(ctx context.Context, id string, updates map[string]i
         updates["title"], updates["author"], updates["published_year"], updates["isbn"],
         time.Now().UTC(), newVersion, id, currentBook.Version,
     )
+    
+    if err != nil {
+        return nil, err
+    }
 
     if cmdTag.RowsAffected() == 0 {
         return nil, errors.New("conflict: book was modified by another request")

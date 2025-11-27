@@ -44,22 +44,19 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 
         // Send metrics to CloudWatch
         cwLogger := logger.GetLogger()
-        if cwLogger != nil {
-            // Track request duration
-            cwLogger.PutMetric(r.Context(), "RequestDuration", float64(duration.Milliseconds()), "Milliseconds")
+if cwLogger != nil {
+    _ = cwLogger.PutMetric(r.Context(), "ClientErrors", 1, "Count")
+}
 
-            // Track by status code
-            if wrapped.statusCode >= 200 && wrapped.statusCode < 300 {
-                cwLogger.PutMetric(r.Context(), "SuccessfulRequests", 1, "Count")
-            } else if wrapped.statusCode >= 400 && wrapped.statusCode < 500 {
-                cwLogger.PutMetric(r.Context(), "ClientErrors", 1, "Count")
-            } else if wrapped.statusCode >= 500 {
-                cwLogger.PutMetric(r.Context(), "ServerErrors", 1, "Count")
-            }
+// And for ServerErrors:
+if cwLogger != nil {
+    _ = cwLogger.PutMetric(r.Context(), "ServerErrors", 1, "Count")
+}
 
-            // Track by endpoint
-            cwLogger.PutMetric(r.Context(), "RequestCount", 1, "Count")
-        }
+// And for RequestCount:
+if cwLogger != nil {
+    _ = cwLogger.PutMetric(r.Context(), "RequestCount", 1, "Count")
+}
     })
 }
 

@@ -10,7 +10,7 @@ import (
     "github.com/stretchr/testify/require"
 )
 
-// Mock book repo
+// Mock for repo.BookRepo
 type mockBookRepo struct {
     createFn   func(ctx context.Context, b *model.Book) error
     getByIDFn  func(ctx context.Context, id string) (model.Book, error)
@@ -41,6 +41,7 @@ func (m *mockBookRepo) Delete(ctx context.Context, id string) error {
 
 var _ repo.BookRepo = (*mockBookRepo)(nil)
 
+// Book Service Tests
 func TestBookService_Create_Success(t *testing.T) {
     ctx := context.Background()
 

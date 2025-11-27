@@ -40,10 +40,10 @@ func (h *UserHandler) RegisterAdmin(w http.ResponseWriter, r *http.Request) {
     }
 
     // Track metric
-    cwLogger := logger.GetLogger()
-    if cwLogger != nil {
-        cwLogger.PutMetric(r.Context(), "AdminRegistered", 1, "Count")
-    }
+   cwLogger := logger.GetLogger()
+if cwLogger != nil {
+    _ = cwLogger.PutMetric(r.Context(), "AdminRegistered", 1, "Count")
+}
 
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusCreated)

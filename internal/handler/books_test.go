@@ -34,6 +34,10 @@ type mockUserServiceForBooks struct {
     deleteFn        func(ctx context.Context, id string) error
 }
 
+func (m *mockUserServiceForBooks) RegisterAdmin(ctx context.Context, req *model.RegisterRequest) (*model.User, error) {
+    return &model.User{Username: req.Username, Email: req.Email, Role: "admin"}, nil
+}
+
 func (m *mockUserServiceForBooks) Register(ctx context.Context, req *model.RegisterRequest) (*model.User, error) {
     return m.registerFn(ctx, req)
 }
@@ -153,7 +157,7 @@ func TestUserHandler_GetProfile_Success(t *testing.T) {
 
     req := createTestRequest("GET", "/users/me", "", "test-user-003")
     ctx := req.Context()
-    ctx = context.WithValue(ctx, "user_id", "user-1")
+    ctx = context.WithValue(ctx, userIDKey, "user-1")
     req = req.WithContext(ctx)
     rec := httptest.NewRecorder()
 
@@ -178,7 +182,7 @@ func TestUserHandler_ListUsers_Success(t *testing.T) {
 
     req := createTestRequest("GET", "/admin/users", "", "test-user-004")
     ctx := req.Context()
-    ctx = context.WithValue(ctx, "role", "ADMIN")
+    ctx = context.WithValue(ctx, roleKey, "ADMIN")
     req = req.WithContext(ctx)
     rec := httptest.NewRecorder()
 

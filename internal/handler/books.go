@@ -123,7 +123,9 @@ func (h *BookHandler) Create(w http.ResponseWriter, r *http.Request) {
         WriteError(r.Context(), w, http.StatusBadRequest, "Invalid request body")
         return
     }
-
+            req.Title = trim(req.Title)
+            req.Author = trim(req.Author)
+            req.ISBN = trim(req.ISBN)
     book := &model.Book{
         Title:         req.Title,
         Author:        req.Author,
@@ -140,7 +142,7 @@ func (h *BookHandler) Create(w http.ResponseWriter, r *http.Request) {
     // track metric in CloudWatch
       cwLogger := logger.GetLogger()
     if cwLogger != nil {
-        cwLogger.PutMetric(r.Context(), "BookCreated", 1, "Count")
+        _ = cwLogger.PutMetric(r.Context(), "BookCreated", 1, "Count")
     }
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusCreated)

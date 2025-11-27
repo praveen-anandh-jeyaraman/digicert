@@ -4,12 +4,23 @@ import (
     "context"
     "log"
     "net/http"
+
     "github.com/praveen-anandh-jeyaraman/digicert/internal/service"
+)
+
+// Define context key type
+type contextKey string
+
+// Define context keys
+const (
+    userIDKey   contextKey = "user_id"
+    roleKey     contextKey = "role"
+    usernameKey contextKey = "username"
 )
 
 // GetRole retrieves role from context
 func GetRole(r *http.Request) string {
-    role, ok := r.Context().Value("role").(string)
+    role, ok := r.Context().Value(roleKey).(string)
     if !ok {
         return ""
     }
@@ -22,7 +33,7 @@ func AdminMiddleware(next http.Handler) http.Handler {
         requestID := GetRequestID(r.Context())
 
         // Get role from context (set by AuthMiddleware)
-        role, ok := r.Context().Value("role").(string)
+        role, ok := r.Context().Value(roleKey).(string)
         if !ok || role != "admin" {
             log.Printf("[%s] Admin access denied. Role: %v", requestID, role)
             WriteError(r.Context(), w, http.StatusForbidden, "Admin access required")
@@ -55,9 +66,9 @@ func AuthMiddleware(authSvc service.AuthService) func(http.Handler) http.Handler
             }
 
             // Add user info to context
-            ctx := context.WithValue(r.Context(), "user_id", claims["user_id"])
-            ctx = context.WithValue(ctx, "username", claims["username"])
-            ctx = context.WithValue(ctx, "role", claims["role"])
+            ctx := context.WithValue(r.Context(), userIDKey, claims["user_id"])
+            ctx = context.WithValue(ctx, usernameKey, claims["username"])
+            ctx = context.WithValue(ctx, roleKey, claims["role"])
 
             next.ServeHTTP(w, r.WithContext(ctx))
         })

@@ -50,7 +50,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
         // Track failed login
         cwLogger := logger.GetLogger()
         if cwLogger != nil {
-            cwLogger.PutMetric(r.Context(), "LoginFailed", 1, "Count")
+            _ = cwLogger.PutMetric(r.Context(), "LoginFailed", 1, "Count")
         }
         WriteError(r.Context(), w, http.StatusUnauthorized, "Invalid username or password")
         return

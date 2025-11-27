@@ -77,7 +77,7 @@ func TestBookingHandler_Borrow_Success(t *testing.T) {
 
     req := createBookingTestRequest("POST", "/bookings", `{"book_id":"book-1","borrow_days":14}`, "test-booking-borrow-001")
     ctx := req.Context()
-    ctx = context.WithValue(ctx, "user_id", "user-1")
+    ctx = context.WithValue(ctx, userIDKey, "user-1")
     req = req.WithContext(ctx)
     rec := httptest.NewRecorder()
 
@@ -96,7 +96,7 @@ func TestBookingHandler_Borrow_InvalidDays(t *testing.T) {
 
     req := createBookingTestRequest("POST", "/bookings", `{"book_id":"book-1","borrow_days":60}`, "test-booking-borrow-002")
     ctx := req.Context()
-    ctx = context.WithValue(ctx, "user_id", "user-1")
+    ctx = context.WithValue(ctx, userIDKey, "user-1")
     req = req.WithContext(ctx)
     rec := httptest.NewRecorder()
 
@@ -127,7 +127,7 @@ func TestBookingHandler_Return_Success(t *testing.T) {
     chiCtx.URLParams.Add("id", "booking-1")
     req := createBookingTestRequest("POST", "/bookings/booking-1/return", "", "test-booking-return-001")
     ctx := req.Context()
-    ctx = context.WithValue(ctx, "user_id", "user-1")
+    ctx = context.WithValue(ctx, userIDKey, "user-1")
     ctx = context.WithValue(ctx, chi.RouteCtxKey, chiCtx)
     req = req.WithContext(ctx)
     rec := httptest.NewRecorder()
@@ -157,7 +157,7 @@ func TestBookingHandler_GetMyBookings_Success(t *testing.T) {
 
     req := createBookingTestRequest("GET", "/bookings", "", "test-booking-getmy-001")
     ctx := req.Context()
-    ctx = context.WithValue(ctx, "user_id", "user-1")
+    ctx = context.WithValue(ctx, userIDKey, "user-1")
     req = req.WithContext(ctx)
     rec := httptest.NewRecorder()
 
@@ -182,7 +182,7 @@ func TestBookingHandler_ListAllBookings_Success(t *testing.T) {
 
     req := createBookingTestRequest("GET", "/admin/bookings", "", "test-booking-listall-001")
     ctx := req.Context()
-    ctx = context.WithValue(ctx, "role", "ADMIN")
+    ctx = context.WithValue(ctx, roleKey, "ADMIN")
     req = req.WithContext(ctx)
     rec := httptest.NewRecorder()
 

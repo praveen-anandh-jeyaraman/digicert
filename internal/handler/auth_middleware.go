@@ -4,18 +4,17 @@ import (
     "context"
     "log"
     "net/http"
+    "bytes"
+    "net/http/httptest"
 
     "github.com/praveen-anandh-jeyaraman/digicert/internal/service"
 )
 
-// Define context key type
-type contextKey string
-
-// Define context keys
+// Define context keys as strings (simple approach that works with tests)
 const (
-    userIDKey   contextKey = "user_id"
-    roleKey     contextKey = "role"
-    usernameKey contextKey = "username"
+    userIDKey   = "user_id"
+    roleKey     = "role"
+    usernameKey = "username"
 )
 
 // GetRole retrieves role from context
@@ -32,7 +31,6 @@ func AdminMiddleware(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         requestID := GetRequestID(r.Context())
 
-        // Get role from context (set by AuthMiddleware)
         role, ok := r.Context().Value(roleKey).(string)
         if !ok || role != "admin" {
             log.Printf("[%s] Admin access denied. Role: %v", requestID, role)
@@ -73,4 +71,14 @@ func AuthMiddleware(authSvc service.AuthService) func(http.Handler) http.Handler
             next.ServeHTTP(w, r.WithContext(ctx))
         })
     }
+}
+
+func CreateTestRequestWithUser(method, path, body, requestID, userID, role string) *http.Request {
+    req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("X-Test-Bypass-Auth", "true")
+    ctx := context.WithValue(req.Context(), RequestIDKey, requestID)
+    ctx = context.WithValue(ctx, userIDKey, userID)
+    ctx = context.WithValue(ctx, roleKey, role)
+    return req.WithContext(ctx)
 }

@@ -10,11 +10,14 @@ import (
     "github.com/praveen-anandh-jeyaraman/digicert/internal/service"
 )
 
-// Define context keys as strings (simple approach that works with tests)
+// Define context key type to avoid collisions (satisfies lint)
+type contextKey string
+
+// Define context keys
 const (
-    userIDKey   = "user_id"
-    roleKey     = "role"
-    usernameKey = "username"
+    userIDKey   contextKey = "user_id"
+    roleKey     contextKey = "role"
+    usernameKey contextKey = "username"
 )
 
 // GetRole retrieves role from context

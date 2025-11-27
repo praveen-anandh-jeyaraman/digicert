@@ -322,7 +322,7 @@ func isValidEmail(email string) bool {
     return strings.Contains(email, "@") && strings.Contains(email, ".")
 }
 func GetUserID(ctx context.Context) string {
-    userID, ok := ctx.Value("user_id").(string)
+    userID, ok := ctx.Value(userIDKey).(string)
     if !ok {
         return ""
     }

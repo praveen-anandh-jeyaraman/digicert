@@ -13,7 +13,7 @@ type BookRepo interface {
 	List(ctx context.Context, limit, offset int) ([]model.Book, error)
 	GetByID(ctx context.Context, id string) (model.Book, error)
 	Create(ctx context.Context, b *model.Book) error
-	Update(ctx context.Context, b *model.Book) error
+    Update(ctx context.Context, id string, updates map[string]interface{}) (*model.Book, error) // ← Changed
 	Delete(ctx context.Context, id string) error
 }
 
@@ -60,21 +60,40 @@ func (r *pgBookRepo) Create(ctx context.Context, b *model.Book) error {
 	return err
 }
 
-func (r *pgBookRepo) Update(ctx context.Context, b *model.Book) error {
-	// optimistic locking
-	newVersion := b.Version + 1
-	b.UpdatedAt = time.Now().UTC()
-	cmdTag, err := r.db.Exec(ctx,
-		`UPDATE books SET title=$1,author=$2,published_year=$3,isbn=$4,updated_at=$5,version=$6 WHERE id=$7 AND version=$8`,
-		b.Title, b.Author, b.PublishedYear, b.ISBN, b.UpdatedAt, newVersion, b.ID, b.Version)
-	if err != nil {
-		return err
-	}
-	if cmdTag.RowsAffected() == 0 {
-		return errors.New("conflict: stale version or not found")
-	}
-	b.Version = newVersion
-	return nil
+func (r *pgBookRepo) Update(ctx context.Context, id string, updates map[string]interface{}) (*model.Book, error) {
+    // Step 1: Get current book (including version)
+    var currentBook model.Book
+    err := r.db.QueryRow(ctx,
+        `SELECT id, version FROM books WHERE id = $1`,
+        id,
+    ).Scan(&currentBook.ID, &currentBook.Version)
+    if err != nil {
+        return nil, errors.New("book not found")
+    }
+
+    // Step 2: Increment version
+    newVersion := currentBook.Version + 1
+
+    // Step 3: Update with optimistic locking
+    cmdTag, err := r.db.Exec(ctx,
+        `UPDATE books 
+         SET title=$1, author=$2, published_year=$3, isbn=$4, 
+             updated_at=$5, version=$6
+         WHERE id=$7 AND version=$8`,
+        updates["title"], updates["author"], updates["published_year"], updates["isbn"],
+        time.Now().UTC(), newVersion, id, currentBook.Version,
+    )
+
+    if cmdTag.RowsAffected() == 0 {
+        return nil, errors.New("conflict: book was modified by another request")
+    }
+
+    // Return updated book
+    book, err := r.GetByID(ctx, id)
+    if err != nil {
+        return nil, err
+    }
+    return &book, nil
 }
 
 func (r *pgBookRepo) Delete(ctx context.Context, id string) error {

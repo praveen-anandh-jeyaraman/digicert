@@ -1,88 +1,158 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"testing"
-	"time"
+    "context"
+    "errors"
+    "testing"
 
-	"github.com/praveen-anandh-jeyaraman/digicert/internal/model"
-	"github.com/stretchr/testify/require"
+    "github.com/praveen-anandh-jeyaraman/digicert/internal/model"
+    "github.com/praveen-anandh-jeyaraman/digicert/internal/repo"
+    "github.com/stretchr/testify/require"
 )
 
-// mockRepo is a tiny mock of repo.BookRepo used for unit tests.
-type mockRepo struct {
-	createFn func(ctx context.Context, b *model.Book) error
-	getFn    func(ctx context.Context, id string) (model.Book, error)
-	listFn   func(ctx context.Context, limit, offset int) ([]model.Book, error)
-	updateFn func(ctx context.Context, b *model.Book) error
-	deleteFn func(ctx context.Context, id string) error
+// Mock book repo
+type mockBookRepo struct {
+    createFn   func(ctx context.Context, b *model.Book) error
+    getByIDFn  func(ctx context.Context, id string) (model.Book, error)
+    listFn     func(ctx context.Context, limit, offset int) ([]model.Book, error)
+    updateFn   func(ctx context.Context, id string, updates map[string]interface{}) (*model.Book, error)
+    deleteFn   func(ctx context.Context, id string) error
 }
 
-func (m *mockRepo) Create(ctx context.Context, b *model.Book) error { return m.createFn(ctx, b) }
-func (m *mockRepo) GetByID(ctx context.Context, id string) (model.Book, error) {
-	return m.getFn(ctx, id)
+func (m *mockBookRepo) Create(ctx context.Context, b *model.Book) error {
+    return m.createFn(ctx, b)
 }
-func (m *mockRepo) List(ctx context.Context, limit, offset int) ([]model.Book, error) {
-	return m.listFn(ctx, limit, offset)
+
+func (m *mockBookRepo) GetByID(ctx context.Context, id string) (model.Book, error) {
+    return m.getByIDFn(ctx, id)
 }
-func (m *mockRepo) Update(ctx context.Context, b *model.Book) error { return m.updateFn(ctx, b) }
-func (m *mockRepo) Delete(ctx context.Context, id string) error     { return m.deleteFn(ctx, id) }
+
+func (m *mockBookRepo) List(ctx context.Context, limit, offset int) ([]model.Book, error) {
+    return m.listFn(ctx, limit, offset)
+}
+
+func (m *mockBookRepo) Update(ctx context.Context, id string, updates map[string]interface{}) (*model.Book, error) {
+    return m.updateFn(ctx, id, updates)
+}
+
+func (m *mockBookRepo) Delete(ctx context.Context, id string) error {
+    return m.deleteFn(ctx, id)
+}
+
+var _ repo.BookRepo = (*mockBookRepo)(nil)
 
 func TestBookService_Create_Success(t *testing.T) {
-	ctx := context.Background()
-	called := false
-	mock := &mockRepo{
-		createFn: func(_ context.Context, b *model.Book) error {
-			called = true
-			// simulate DB populating ID/version/timestamps
-			b.ID = "fake-id-1"
-			b.CreatedAt = time.Now().UTC()
-			b.UpdatedAt = b.CreatedAt
-			b.Version = 1
-			return nil
-		},
-	}
-	svc := NewBookService(mock)
-	book := &model.Book{Title: "T", Author: "A"}
-	err := svc.Create(ctx, book)
-	require.NoError(t, err)
-	require.True(t, called)
-	require.NotEmpty(t, book.ID)
-	require.Equal(t, 1, book.Version)
+    ctx := context.Background()
+
+    mock := &mockBookRepo{
+        createFn: func(_ context.Context, b *model.Book) error {
+            b.ID = "book-1"
+            b.Version = 1
+            return nil
+        },
+    }
+
+    svc := NewBookService(mock)
+    book := &model.Book{Title: "Go Programming", Author: "Donovan"}
+    err := svc.Create(ctx, book)
+
+    require.NoError(t, err)
+    require.NotEmpty(t, book.ID)
+    require.Equal(t, 1, book.Version)
 }
 
-func TestBookService_Update_Conflict(t *testing.T) {
-	ctx := context.Background()
-	mock := &mockRepo{
-		updateFn: func(_ context.Context, b *model.Book) error {
-			return errors.New("conflict: stale version or not found")
-		},
-	}
-	svc := NewBookService(mock)
-	err := svc.Update(ctx, &model.Book{ID: "x", Version: 1})
-	require.ErrorIs(t, err, ErrConflict)
+func TestBookService_GetByID_Success(t *testing.T) {
+    ctx := context.Background()
+
+    mock := &mockBookRepo{
+        getByIDFn: func(_ context.Context, id string) (model.Book, error) {
+            return model.Book{
+                ID:            id,
+                Title:         "Go Programming",
+                Author:        "Donovan",
+                Version:       1,
+                PublishedYear: 2015,
+            }, nil
+        },
+    }
+
+    svc := NewBookService(mock)
+    book, err := svc.GetByID(ctx, "book-1")
+
+    require.NoError(t, err)
+    require.Equal(t, "book-1", book.ID)
+    require.Equal(t, "Go Programming", book.Title)
 }
 
-func TestBookService_ListAndGet(t *testing.T) {
-	ctx := context.Background()
-	now := time.Now().UTC()
-	mock := &mockRepo{
-		listFn: func(_ context.Context, limit, offset int) ([]model.Book, error) {
-			return []model.Book{
-				{ID: "a", Title: "A", Author: "AA", CreatedAt: now, UpdatedAt: now, Version: 1},
-			}, nil
-		},
-		getFn: func(_ context.Context, id string) (model.Book, error) {
-			return model.Book{ID: id, Title: "A", Author: "AA", CreatedAt: now, UpdatedAt: now, Version: 1}, nil
-		},
-	}
-	svc := NewBookService(mock)
-	list, err := svc.List(ctx, 10, 0)
-	require.NoError(t, err)
-	require.Len(t, list, 1)
+func TestBookService_GetByID_NotFound(t *testing.T) {
+    ctx := context.Background()
 
-	got, err := svc.Get(ctx, "a")
-	require.NoError(t, err)
-	require.Equal(t, "a", got.ID)
+    mock := &mockBookRepo{
+        getByIDFn: func(_ context.Context, id string) (model.Book, error) {
+            return model.Book{}, errors.New("not found")
+        },
+    }
+
+    svc := NewBookService(mock)
+    book, err := svc.GetByID(ctx, "nonexistent")
+
+    require.Error(t, err)
+    require.Equal(t, model.Book{}, book)
+}
+
+func TestBookService_Update_Success(t *testing.T) {
+    ctx := context.Background()
+
+    mock := &mockBookRepo{
+        updateFn: func(_ context.Context, id string, updates map[string]interface{}) (*model.Book, error) {
+            return &model.Book{
+                ID:      id,
+                Title:   "Go Programming - Updated",
+                Author:  "Donovan",
+                Version: 2,
+            }, nil
+        },
+    }
+
+    svc := NewBookService(mock)
+    updates := map[string]interface{}{"title": "Go Programming - Updated"}
+    book, err := svc.Update(ctx, "book-1", updates)
+
+    require.NoError(t, err)
+    require.Equal(t, "Go Programming - Updated", book.Title)
+    require.Equal(t, 2, book.Version)
+}
+
+func TestBookService_List_Success(t *testing.T) {
+    ctx := context.Background()
+
+    mock := &mockBookRepo{
+        listFn: func(_ context.Context, limit, offset int) ([]model.Book, error) {
+            return []model.Book{
+                {ID: "1", Title: "Book 1", Version: 1},
+                {ID: "2", Title: "Book 2", Version: 1},
+            }, nil
+        },
+    }
+
+    svc := NewBookService(mock)
+    books, err := svc.List(ctx, 10, 0)
+
+    require.NoError(t, err)
+    require.Len(t, books, 2)
+}
+
+func TestBookService_Delete_Success(t *testing.T) {
+    ctx := context.Background()
+
+    mock := &mockBookRepo{
+        deleteFn: func(_ context.Context, id string) error {
+            return nil
+        },
+    }
+
+    svc := NewBookService(mock)
+    err := svc.Delete(ctx, "book-1")
+
+    require.NoError(t, err)
 }

@@ -12,12 +12,11 @@ import (
     "github.com/go-chi/chi/v5"
     "github.com/praveen-anandh-jeyaraman/digicert/internal/handler"
     "github.com/praveen-anandh-jeyaraman/digicert/internal/model"
-    "github.com/praveen-anandh-jeyaraman/digicert/internal/service"
     "github.com/stretchr/testify/require"
 )
 
-// Helper to add request ID to context
-func createRequestWithID(method, path string, body *bytes.Buffer) *http.Request {
+// Helper to add request ID to context - FIXED: Use RequestIDKey from handler package
+func createRequestWithID(method, path string, body *bytes.Buffer, requestID string) *http.Request {
     var req *http.Request
     if body != nil {
         req = httptest.NewRequest(method, path, body)
@@ -25,8 +24,8 @@ func createRequestWithID(method, path string, body *bytes.Buffer) *http.Request 
         req = httptest.NewRequest(method, path, nil)
     }
 
-    // Add request ID to context
-    ctx := context.WithValue(req.Context(), handler.RequestIDKey, "integration-test-123")
+    // Use the typed RequestIDKey from handler package
+    ctx := context.WithValue(req.Context(), handler.RequestIDKey, requestID)
     return req.WithContext(ctx)
 }
 
@@ -44,11 +43,11 @@ func (m *mockBookService) List(ctx context.Context, limit, offset int) ([]model.
     return books, nil
 }
 
-func (m *mockBookService) Get(ctx context.Context, id string) (model.Book, error) {
+func (m *mockBookService) GetByID(ctx context.Context, id string) (model.Book, error) {
     if b, ok := m.books[id]; ok {
         return *b, nil
     }
-    return model.Book{}, service.ErrConflict
+    return model.Book{}, fmt.Errorf("book not found")
 }
 
 func (m *mockBookService) Create(ctx context.Context, b *model.Book) error {
@@ -58,17 +57,22 @@ func (m *mockBookService) Create(ctx context.Context, b *model.Book) error {
     return nil
 }
 
-func (m *mockBookService) Update(ctx context.Context, b *model.Book) error {
-    if _, ok := m.books[b.ID]; !ok {
-        return service.ErrConflict
+func (m *mockBookService) Update(ctx context.Context, id string, updates map[string]interface{}) (*model.Book, error) {
+    if _, ok := m.books[id]; !ok {
+        return nil, fmt.Errorf("book not found")
     }
-    m.books[b.ID] = b
-    return nil
+    if title, ok := updates["title"].(string); ok {
+        m.books[id].Title = title
+    }
+    if author, ok := updates["author"].(string); ok {
+        m.books[id].Author = author
+    }
+    return m.books[id], nil
 }
 
 func (m *mockBookService) Delete(ctx context.Context, id string) error {
-	if _, ok := m.books[id]; !ok {
-        return service.ErrConflict
+    if _, ok := m.books[id]; !ok {
+        return fmt.Errorf("book not found")
     }
     delete(m.books, id)
     return nil
@@ -86,7 +90,7 @@ func TestIntegration_CreateAndRetrieveBook(t *testing.T) {
 
     // Create a book
     createBody := `{"title":"Go Programming","author":"John Doe","published_year":2020}`
-    req := createRequestWithID("POST", "/books", bytes.NewBufferString(createBody))
+    req := createRequestWithID("POST", "/books", bytes.NewBufferString(createBody), "integration-create-retrieve-001")
     req.Header.Set("Content-Type", "application/json")
     rec := httptest.NewRecorder()
 
@@ -101,7 +105,7 @@ func TestIntegration_CreateAndRetrieveBook(t *testing.T) {
     // Retrieve the book
     chiCtx := chi.NewRouteContext()
     chiCtx.URLParams.Add("id", created.ID)
-    getReq := createRequestWithID("GET", "/books/"+created.ID, nil)
+    getReq := createRequestWithID("GET", "/books/"+created.ID, nil, "integration-create-retrieve-002")
     getReq = getReq.WithContext(context.WithValue(getReq.Context(), chi.RouteCtxKey, chiCtx))
     getRec := httptest.NewRecorder()
 
@@ -120,7 +124,7 @@ func TestIntegration_CreateUpdateDelete(t *testing.T) {
 
     // Create
     createBody := `{"title":"Rust Book","author":"Jane Smith"}`
-    req := createRequestWithID("POST", "/books", bytes.NewBufferString(createBody))
+    req := createRequestWithID("POST", "/books", bytes.NewBufferString(createBody), "integration-cud-001")
     req.Header.Set("Content-Type", "application/json")
     rec := httptest.NewRecorder()
     h.Create(rec, req)
@@ -129,11 +133,12 @@ func TestIntegration_CreateUpdateDelete(t *testing.T) {
     var created model.Book
     err := json.Unmarshal(rec.Body.Bytes(), &created)
     require.NoError(t, err)
+
     // Update
     chiCtx := chi.NewRouteContext()
     chiCtx.URLParams.Add("id", created.ID)
     updateBody := `{"title":"Rust Book 2nd Edition","author":"Jane Smith","published_year":2023}`
-    updateReq := createRequestWithID("PUT", "/books/"+created.ID, bytes.NewBufferString(updateBody))
+    updateReq := createRequestWithID("PUT", "/books/"+created.ID, bytes.NewBufferString(updateBody), "integration-cud-002")
     updateReq = updateReq.WithContext(context.WithValue(updateReq.Context(), chi.RouteCtxKey, chiCtx))
     updateRec := httptest.NewRecorder()
     h.Update(updateRec, updateReq)
@@ -142,7 +147,7 @@ func TestIntegration_CreateUpdateDelete(t *testing.T) {
     // Delete
     chiCtx2 := chi.NewRouteContext()
     chiCtx2.URLParams.Add("id", created.ID)
-    delReq := createRequestWithID("DELETE", "/books/"+created.ID, nil)
+    delReq := createRequestWithID("DELETE", "/books/"+created.ID, nil, "integration-cud-003")
     delReq = delReq.WithContext(context.WithValue(delReq.Context(), chi.RouteCtxKey, chiCtx2))
     delRec := httptest.NewRecorder()
     h.Delete(delRec, delReq)
@@ -155,16 +160,16 @@ func TestIntegration_ListBooks(t *testing.T) {
 
     // Create multiple books
     for i := 1; i <= 3; i++ {
-        title := "Book " + string(rune(48+i))
-        createBody := `{"title":"` + title + `","author":"Author"}`
-        req := createRequestWithID("POST", "/books", bytes.NewBufferString(createBody))
+        title := fmt.Sprintf("Book %d", i)
+        createBody := fmt.Sprintf(`{"title":"%s","author":"Author"}`, title)
+        req := createRequestWithID("POST", "/books", bytes.NewBufferString(createBody), fmt.Sprintf("integration-list-create-%03d", i))
         req.Header.Set("Content-Type", "application/json")
         rec := httptest.NewRecorder()
         h.Create(rec, req)
     }
 
     // List books
-    listReq := createRequestWithID("GET", "/books?limit=10&offset=0", nil)
+    listReq := createRequestWithID("GET", "/books?limit=10&offset=0", nil, "integration-list-001")
     listRec := httptest.NewRecorder()
     h.List(listRec, listReq)
     require.Equal(t, http.StatusOK, listRec.Code)

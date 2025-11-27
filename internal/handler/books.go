@@ -5,24 +5,30 @@ import (
     "log"
     "net/http"
     "strconv"
-    "time"
+    "strings"
 
     "github.com/go-chi/chi/v5"
+    "github.com/praveen-anandh-jeyaraman/digicert/internal/logger"
     "github.com/praveen-anandh-jeyaraman/digicert/internal/model"
     "github.com/praveen-anandh-jeyaraman/digicert/internal/service"
 )
 
 type BookHandler struct {
-    svc    service.BookService
-    logger *StructuredLogger
+    svc service.BookService
 }
 
 func NewBookHandler(svc service.BookService) *BookHandler {
-    return &BookHandler{
-        svc:    svc,
-        logger: NewStructuredLogger(),
-    }
+    return &BookHandler{svc: svc}
 }
+
+// UpdateBookRequest for PUT requests
+type UpdateBookRequest struct {
+    Title         string `json:"title"`
+    Author        string `json:"author"`
+    PublishedYear int    `json:"published_year"`
+    ISBN          string `json:"isbn"`
+}
+
 // List godoc
 // @Summary      List all books
 // @Description  Get a paginated list of all books
@@ -35,45 +41,36 @@ func NewBookHandler(svc service.BookService) *BookHandler {
 // @Failure      500  {object}  ErrorResponse
 // @Router       /books [get]
 func (h *BookHandler) List(w http.ResponseWriter, r *http.Request) {
-    ctx := r.Context()
-    requestID := GetRequestID(ctx)
-    log.Printf("[%s] Listing books", requestID)
+    requestID := GetRequestID(r.Context())
 
     limit := 20
     offset := 0
-    qs := r.URL.Query()
 
-    if v := qs.Get("limit"); v != "" {
-        i, err := strconv.Atoi(v)
-        if err != nil || i < 1 || i > 100 {
-            WriteError(ctx, w, http.StatusBadRequest, "limit must be between 1 and 100")
-            return
+    if l := r.URL.Query().Get("limit"); l != "" {
+        if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
+            limit = parsed
         }
-        limit = i
     }
 
-    if v := qs.Get("offset"); v != "" {
-        i, err := strconv.Atoi(v)
-        if err != nil || i < 0 {
-            WriteError(ctx, w, http.StatusBadRequest, "offset must be >= 0")
-            return
+    if o := r.URL.Query().Get("offset"); o != "" {
+        if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+            offset = parsed
         }
-        offset = i
     }
 
-    books, err := h.svc.List(ctx, limit, offset)
+    books, err := h.svc.List(r.Context(), limit, offset)
     if err != nil {
-        log.Printf("[%s] Error listing books: %v", requestID, err)
-        WriteError(ctx, w, http.StatusInternalServerError, "failed to list books")
+        log.Printf("[%s] List failed: %v", requestID, err)
+        WriteError(r.Context(), w, http.StatusInternalServerError, "Failed to list books")
         return
     }
 
-    log.Printf("[%s] Successfully listed %d books", requestID, len(books))
     w.Header().Set("Content-Type", "application/json")
-    if err := json.NewEncoder(w).Encode(books); err != nil {
-        log.Printf("[%s] failed to encode response: %v", GetRequestID(r.Context()), err)
-    }
+    w.WriteHeader(http.StatusOK)
+    _ = json.NewEncoder(w).Encode(books)
+    log.Printf("[%s] Listed %d books", requestID, len(books))
 }
+
 // Get godoc
 // @Summary      Get a book by ID
 // @Description  Retrieve a single book by its ID
@@ -85,23 +82,27 @@ func (h *BookHandler) List(w http.ResponseWriter, r *http.Request) {
 // @Failure      500  {object}  ErrorResponse
 // @Router       /books/{id} [get]
 func (h *BookHandler) Get(w http.ResponseWriter, r *http.Request) {
-    ctx := r.Context()
+    requestID := GetRequestID(r.Context())
     id := chi.URLParam(r, "id")
-    requestID := GetRequestID(ctx)
-    log.Printf("[%s] Getting book: %s", requestID, id)
 
-    b, err := h.svc.Get(ctx, id)
+    book, err := h.svc.GetByID(r.Context(), id) // ← Changed from Get to GetByID
     if err != nil {
-        log.Printf("[%s] Book not found: %s", requestID, id)
-        WriteError(ctx, w, http.StatusNotFound, "book not found")
+        if strings.Contains(err.Error(), "not found") {
+            log.Printf("[%s] Book not found: %s", requestID, id)
+            WriteError(r.Context(), w, http.StatusNotFound, "Book not found")
+            return
+        }
+        log.Printf("[%s] Get failed: %v", requestID, err)
+        WriteError(r.Context(), w, http.StatusInternalServerError, "Failed to get book")
         return
     }
 
     w.Header().Set("Content-Type", "application/json")
-    if err := json.NewEncoder(w).Encode(b); err != nil {
-        log.Printf("[%s] failed to encode response: %v", GetRequestID(r.Context()), err)
-    }
+    w.WriteHeader(http.StatusOK)
+    _ = json.NewEncoder(w).Encode(book)
+    log.Printf("[%s] Book retrieved: %s", requestID, id)
 }
+
 // Create godoc
 // @Summary      Create a new book
 // @Description  Create a new book with validation
@@ -113,76 +114,47 @@ func (h *BookHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Failure      400  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
 // @Router       /books [post]
-
 func (h *BookHandler) Create(w http.ResponseWriter, r *http.Request) {
-    ctx := r.Context()
-    requestID := GetRequestID(ctx)
-    log.Printf("[%s] Creating book", requestID)
+    requestID := GetRequestID(r.Context())
 
     var req model.CreateBookRequest
     if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        log.Printf("[%s] Failed to decode request: %v", requestID, err)
-        WriteError(ctx, w, http.StatusBadRequest, "invalid JSON payload")
+        log.Printf("[%s] Invalid request: %v", requestID, err)
+        WriteError(r.Context(), w, http.StatusBadRequest, "Invalid request body")
         return
     }
 
-    errs := ValidationErrors{}
-    req.Title = trim(req.Title)
-    req.Author = trim(req.Author)
-    req.ISBN = trim(req.ISBN)
-
-    if req.Title == "" {
-        errs["title"] = "title is required"
-    } else if len(req.Title) > 255 {
-        errs["title"] = "title must be at most 255 characters"
-    }
-
-    if req.Author == "" {
-        errs["author"] = "author is required"
-    } else if len(req.Author) > 100 {
-        errs["author"] = "author must be at most 100 characters"
-    }
-
-    curYear := time.Now().Year()
-    if req.PublishedYear != 0 {
-        if req.PublishedYear < 1000 || req.PublishedYear > curYear+1 {
-            errs["published_year"] = "invalid published_year"
-        }
-    }
-
-    if len(errs) > 0 {
-        log.Printf("[%s] Validation failed: %v", requestID, errs)
-        WriteValidationErrors(ctx, w, errs)
-        return
-    }
-
-    b := model.Book{
+    book := &model.Book{
         Title:         req.Title,
         Author:        req.Author,
-        ISBN:          req.ISBN,
         PublishedYear: req.PublishedYear,
+        ISBN:          req.ISBN,
     }
 
-    if err := h.svc.Create(ctx, &b); err != nil {
-        log.Printf("[%s] Failed to create book: %v", requestID, err)
-        WriteError(ctx, w, http.StatusInternalServerError, "failed to create book")
+    if err := h.svc.Create(r.Context(), book); err != nil {
+        log.Printf("[%s] Create failed: %v", requestID, err)
+        WriteError(r.Context(), w, http.StatusInternalServerError, "Failed to create book")
         return
     }
 
-    log.Printf("[%s] Book created successfully: %s", requestID, b.ID)
+    // track metric in CloudWatch
+      cwLogger := logger.GetLogger()
+    if cwLogger != nil {
+        cwLogger.PutMetric(r.Context(), "BookCreated", 1, "Count")
+    }
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusCreated)
-    if err := json.NewEncoder(w).Encode(b); err != nil {
-        log.Printf("[%s] failed to encode response: %v", GetRequestID(r.Context()), err)
-    }
+    _ = json.NewEncoder(w).Encode(book)
+    log.Printf("[%s] Book created: %s", requestID, book.ID)
 }
+
 // Update godoc
 // @Summary      Update a book
 // @Description  Update book details by ID
 // @Tags         Books
 // @Accept       json
 // @Param        id       path      string  true  "Book ID"
-// @Param        request  body      model.Book  true  "Updated book data"
+// @Param        request  body      UpdateBookRequest  true  "Updated book data"
 // @Produce      json
 // @Success      200  {object}  model.Book
 // @Failure      400  {object}  ErrorResponse
@@ -190,42 +162,41 @@ func (h *BookHandler) Create(w http.ResponseWriter, r *http.Request) {
 // @Failure      500  {object}  ErrorResponse
 // @Router       /books/{id} [put]
 func (h *BookHandler) Update(w http.ResponseWriter, r *http.Request) {
-    ctx := r.Context()
+    requestID := GetRequestID(r.Context())
     id := chi.URLParam(r, "id")
-    requestID := GetRequestID(ctx)
-    log.Printf("[%s] Updating book: %s", requestID, id)
 
-    var b model.Book
-    if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
-        log.Printf("[%s] Failed to decode request: %v", requestID, err)
-        WriteError(ctx, w, http.StatusBadRequest, "invalid JSON payload")
+    var req UpdateBookRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        log.Printf("[%s] Invalid request: %v", requestID, err)
+        WriteError(r.Context(), w, http.StatusBadRequest, "Invalid request body")
         return
     }
 
-    curYear := time.Now().Year()
-    if b.PublishedYear != 0 {
-        if b.PublishedYear < 1000 || b.PublishedYear > curYear+1 {
-            WriteError(ctx, w, http.StatusBadRequest, "invalid published_year")
-            return
-        }
+    updates := map[string]interface{}{
+        "title":          req.Title,
+        "author":         req.Author,
+        "published_year": req.PublishedYear,
+        "isbn":           req.ISBN,
     }
 
-    b.ID = id
-    if err := h.svc.Update(ctx, &b); err != nil {
-        if err == service.ErrConflict {
-            log.Printf("[%s] Conflict updating book: %s", requestID, id)
-            WriteError(ctx, w, http.StatusConflict, "version conflict or book not found")
+    book, err := h.svc.Update(r.Context(), id, updates)
+    if err != nil {
+        if strings.Contains(err.Error(), "conflict") {
+            log.Printf("[%s] Conflict: %v", requestID, err)
+            WriteError(r.Context(), w, http.StatusConflict, "Book was modified by another request. Please refetch and retry.")
             return
         }
-        log.Printf("[%s] Failed to update book: %v", requestID, err)
-        WriteError(ctx, w, http.StatusInternalServerError, "failed to update book")
+        log.Printf("[%s] Update failed: %v", requestID, err)
+        WriteError(r.Context(), w, http.StatusInternalServerError, "Failed to update book")
         return
     }
 
-    log.Printf("[%s] Book updated successfully: %s", requestID, b.ID)
     w.Header().Set("Content-Type", "application/json")
-    _ = json.NewEncoder(w).Encode(b)
+    w.WriteHeader(http.StatusOK)
+    _ = json.NewEncoder(w).Encode(book)
+    log.Printf("[%s] Book updated: %s", requestID, id)
 }
+
 // Delete godoc
 // @Summary      Delete a book
 // @Description  Delete a book by ID
@@ -235,34 +206,15 @@ func (h *BookHandler) Update(w http.ResponseWriter, r *http.Request) {
 // @Failure      500  {object}  ErrorResponse
 // @Router       /books/{id} [delete]
 func (h *BookHandler) Delete(w http.ResponseWriter, r *http.Request) {
-    ctx := r.Context()
+    requestID := GetRequestID(r.Context())
     id := chi.URLParam(r, "id")
-    requestID := GetRequestID(ctx)
-    log.Printf("[%s] Deleting book: %s", requestID, id)
 
-    if err := h.svc.Delete(ctx, id); err != nil {
-        log.Printf("[%s] Failed to delete book: %v", requestID, err)
-        WriteError(ctx, w, http.StatusInternalServerError, "failed to delete book")
+    if err := h.svc.Delete(r.Context(), id); err != nil {
+        log.Printf("[%s] Delete failed: %v", requestID, err)
+        WriteError(r.Context(), w, http.StatusInternalServerError, "Failed to delete book")
         return
     }
 
-    log.Printf("[%s] Book deleted successfully: %s", requestID, id)
     w.WriteHeader(http.StatusNoContent)
-}
-
-// Health godoc
-// @Summary      Health check
-// @Description  Check if the service is healthy
-// @Tags         Health
-// @Produce      json
-// @Success      200  {object}  map[string]string
-// @Router       /healthz [get]
-func (h *BookHandler) Health(w http.ResponseWriter, r *http.Request) {
-    ctx := r.Context()
-    requestID := GetRequestID(ctx)
-    log.Printf("[%s] Health check", requestID)
-
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusOK)
-    _ = json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+    log.Printf("[%s] Book deleted: %s", requestID, id)
 }

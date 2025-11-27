@@ -1,178 +1,173 @@
-# digicert
-# DigiCert
+# DigiCert Book API
 
-A RESTful API service for managing books built with Go, Chi router, and PostgreSQL.
+A RESTful API for managing books, users, and borrowing system. Built with Go, PostgreSQL, Docker, and AWS CloudWatch metrics.
+
+---
 
 ## Features
 
-- **Book Management**: Create, read, update, and delete books
-- **Validation**: Request validation for book data (title, author, ISBN, published year)
-- **Error Handling**: Comprehensive error handling with validation error responses
-- **Testing**: Unit tests and integration tests with mocks
-- **Database**: PostgreSQL with connection pooling
-- **Clean Architecture**: Layered architecture (handler → service → repository)
+- **User Registration & Login** (JWT-based authentication)
+- **Admin Registration**
+- **Book CRUD** (Admin only)
+- **User Profile Management**
+- **Borrow & Return Books**
+- **Admin User Management**
+- **CloudWatch Metrics Integration**
+- **Swagger/OpenAPI Documentation**
+- **Health & Readiness Endpoints**
+- **Graceful Shutdown**
 
-## Project Structure
+---
 
-```
-digicert/
-├── internal/
-│   ├── app/           # Application setup and configuration
-│   ├── db/            # Database initialization and migrations
-│   ├── handler/       # HTTP handlers
-│   ├── model/         # Data models
-│   ├── repo/          # Repository layer (data access)
-│   └── service/       # Business logic layer
-├── test/              # Integration tests
-├── go.mod
-├── go.sum
-└── Readme.md
-```
+## Deployment
 
-## API Endpoints
+### EC2 Instance
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/books` | List all books (with pagination) |
-| GET | `/books/{id}` | Get a specific book |
-| POST | `/books` | Create a new book |
-| PUT | `/books/{id}` | Update a book |
-| DELETE | `/books/{id}` | Delete a book |
+- **Public IP:** `98.92.152.54`
+- **Private IP:** `172.31.70.59`
+-- **DNS:** http://library-api-alb-916820835.us-east-1.elb.amazonaws.com
+- The API is deployed and accessible via the public IP (ensure security group allows inbound traffic on the API port, e.g. `8080`).
 
-## Request/Response Examples
+---
 
-### Create Book
-**Request:**
-```json
-POST /books
-{
-  "title": "Go Programming",
-  "author": "John Doe",
-  "isbn": "978-1234567890",
-  "published_year": 2020
-}
-```
+## Getting Started
 
-**Response (201 Created):**
-```json
-{
-  "id": "book-1",
-  "title": "Go Programming",
-  "author": "John Doe",
-  "isbn": "978-1234567890",
-  "published_year": 2020,
-  "created_at": "2025-11-25T10:30:00Z",
-  "updated_at": "2025-11-25T10:30:00Z",
-  "version": 1
-}
-```
-
-### Validation Errors
-**Response (400 Bad Request):**
-```json
-{
-  "title": "title is required",
-  "author": "author must be at most 100 characters"
-}
-```
-
-## Requirements
+### Prerequisites
 
 - Go 1.21+
-- PostgreSQL 12+
-- Chi v5 (HTTP router)
-- pgx (PostgreSQL driver)
-- testify (testing toolkit)
+- Docker & Docker Compose
+- PostgreSQL
 
-## Installation
+### Clone the Repository
 
-1. Clone the repository:
 ```bash
-git clone https://github.com/praveen-anandh-jeyaraman/digicert.git
+git clone https://github.com/<your-username>/digicert.git
 cd digicert
 ```
 
-2. Install dependencies:
+### Environment Variables
+
+Create a `.env` file in the project root:
+
+```properties
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=example
+POSTGRES_DB=digicert
+DATABASE_URL=postgres://postgres:example@db:5432/digicert?sslmode=disable
+PORT=8080
+ENABLE_CLOUDWATCH=false
+AWS_REGION=us-east-1
+CW_LOG_GROUP=/aws/ec2/library-api
+CW_LOG_STREAM=library-api-dev
+WT_SECRET=your-super-secret-jwt-key-change-in-production
+JWT_TTL=24h
+```
+
+---
+
+## Running Locally
+
+### With Docker Compose
+
 ```bash
-go mod download
+docker-compose up
 ```
 
-3. Set up environment variables:
-```bash
-export DB_HOST=localhost
-export DB_PORT=5432
-export DB_USER=postgres
-export DB_PASSWORD=password
-export DB_NAME=digicert
-```
+- API available at `http://localhost:8080`
+- PostgreSQL runs in a container
 
-4. Run migrations (if available):
-```bash
-go run cmd/migrate/main.go
-```
+### Without Docker
 
-## Running the Application
+1. Start PostgreSQL locally.
+2. Update `DATABASE_URL` in `.env` to use `localhost`.
+3. Run:
 
-```bash
-go run cmd/main.go
-```
+    ```bash
+    go run ./cmd/library-api/main.go
+    ```
 
-The server will start on `http://localhost:8080`
+---
 
-## Running Tests
+## API Documentation
 
-### Unit Tests (Handler layer)
-```bash
-go test ./internal/handler -v
-```
+Swagger UI available at `/swagger/index.html` (if enabled).
 
-### Integration Tests
-```bash
-go test ./test -v
-```
+---
 
-### All Tests
-```bash
-go test ./... -v
-```
+## Endpoints
 
-## Validation Rules
+### Health
 
-- **Title**: Required, max 255 characters
-- **Author**: Required, max 100 characters
-- **Published Year**: Optional, must be between 1000 and current year + 1
-- **ISBN**: Optional
+- `GET /healthz` — Health check
+- `GET /readyz` — Readiness check
 
-## Error Handling
+### Auth
 
-The API returns standardized error responses:
+- `POST /auth/register` — Register user
+- `POST /auth/admin-register` — Register admin
+- `POST /auth/login` — Login
+- `POST /auth/refresh` — Refresh JWT
 
-- **400 Bad Request**: Invalid input or validation errors
-- **404 Not Found**: Resource not found
-- **409 Conflict**: Version conflict or constraint violation
-- **500 Internal Server Error**: Server-side errors
+### Users
 
-## Architecture
+- `GET /users/me` — Get profile
+- `PUT /users/me` — Update profile
 
-### Layers
+### Books
 
-1. **Handler Layer** (`internal/handler/`): HTTP request/response handling
-2. **Service Layer** (`internal/service/`): Business logic and validation
-3. **Repository Layer** (`internal/repo/`): Database operations
-4. **Model Layer** (`internal/model/`): Data structures
+- `GET /books` — List books
+- `GET /books/{id}` — Get book details
 
-### Dependency Injection
+### Admin (Protected)
 
-The application uses constructor-based dependency injection:
+- `POST /admin/books` — Create book
+- `PUT /admin/books/{id}` — Update book
+- `DELETE /admin/books/{id}` — Delete book
+- `GET /admin/users` — List users
+- `GET /admin/users/{id}` — Get user
+- `DELETE /admin/users/{id}` — Delete user
+- `GET /admin/bookings` — List all bookings
 
-```go
-svc := service.NewBookService(repo)
-handler := handler.NewBookHandler(svc)
-```
-“The current domain fits well into a single relational table due to simple data relationships and low expected volume. If the system grew (e.g., multi-author support, publishers, inventory, user ratings), I would introduce additional normalized tables.
+### Borrowing
 
-For extremely high throughput scenarios, scaling strategies like read replicas, partitioning, or sharding across tenants could be introduced — but these are not necessary for the current scope.”
+- `GET /bookings` — List my bookings
+- `POST /bookings` — Borrow book
+- `GET /bookings/{id}` — Get booking
+- `POST /bookings/{id}/return` — Return book
 
-## Author
+---
 
-Praveen Anandh Jeyaraman
+## CloudWatch Metrics
+
+- Metrics are sent to AWS CloudWatch if `ENABLE_CLOUDWATCH=true`.
+- For local development, set `ENABLE_CLOUDWATCH=false` to disable metrics/logs to AWS.
+
+---
+
+## Graceful Shutdown
+
+The server supports graceful shutdown on `Ctrl+C`.
+
+---
+
+## Architecture Decisions
+
+See the `/adr/` directory for Architecture Decision Records (ADRs) documenting key technical choices (Go, PostgreSQL, JWT, Docker, CloudWatch, etc.).
+
+---
+
+## License
+
+Apache 2.0
+
+---
+
+## Contributing
+
+Pull requests welcome! Please open issues for bugs or feature requests.
+
+---
+
+## Contact
+
+API Support: [support@swagger.io](mailto:support@swagger.io)

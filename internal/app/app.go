@@ -45,11 +45,9 @@ func New(ctx context.Context) (*App, error) {
 }
 
 // Close releases resources gracefully.
-// main.go should call app.Close() during shutdown.
 func (a *App) Close(ctx context.Context) error {
 	if a.DB != nil {
 		a.DB.Close()
 	}
-	// add other closers here (redis, grpc clients, tracers, metrics)
 	return nil
 }

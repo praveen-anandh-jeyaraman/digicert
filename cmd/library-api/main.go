@@ -7,19 +7,21 @@ import (
     "os"
     "os/signal"
     "time"
+    "strings"
 
     "github.com/go-chi/chi/v5"
     "github.com/go-chi/chi/v5/middleware"
-	httpSwagger "github.com/swaggo/http-swagger"
     "github.com/praveen-anandh-jeyaraman/digicert/internal/app"
     "github.com/praveen-anandh-jeyaraman/digicert/internal/handler"
+    // "github.com/praveen-anandh-jeyaraman/digicert/internal/logger"
     "github.com/praveen-anandh-jeyaraman/digicert/internal/repo"
     "github.com/praveen-anandh-jeyaraman/digicert/internal/service"
-	_ "github.com/praveen-anandh-jeyaraman/digicert/docs"
+    _ "github.com/praveen-anandh-jeyaraman/digicert/docs"
 )
+
 // @title           DigiCert Book API
 // @version         1.0
-// @description     A RESTful API for managing books
+// @description     A RESTful API for managing books and borrowing system
 // @termsOfService  http://swagger.io/terms/
 
 // @contact.name   API Support
@@ -34,6 +36,11 @@ import (
 
 // @schemes http https
 
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token.
+
 func main() {
     ctx := context.Background()
 
@@ -42,41 +49,54 @@ func main() {
         log.Fatalf("failed to load config: %v", err)
     }
 
-    logger := app.NewStdLogger()
+    // Initialize CloudWatch logger
+    // if err := logger.Initialize(cfg.CloudWatchLogGroup, cfg.CloudWatchLogStream, cfg.EnableCloudWatch); err != nil {
+    //     log.Printf("Warning: CloudWatch initialization failed: %v", err)
+    // }
+    // defer logger.GetLogger().Close()
+    // log.Printf("Logger initialized - CloudWatch: %v", cfg.EnableCloudWatch)
+
+    stdLogger := app.NewStdLogger()
 
     dbpool, err := app.NewDBPool(ctx, cfg)
     if err != nil {
-        logger.Fatalf("db connect failed: %v", err)
+        stdLogger.Fatalf("db connect failed: %v", err)
     }
     defer dbpool.Close()
 
+    // Initialize repositories
     bookRepo := repo.NewBookRepo(dbpool)
+    userRepo := repo.NewUserRepo(dbpool)
+    bookingRepo := repo.NewBookingRepo(dbpool)
+
+    // Initialize services
     bookSvc := service.NewBookService(bookRepo)
+    userSvc := service.NewUserService(userRepo)
+    bookingSvc := service.NewBookingService(bookingRepo, bookRepo, userRepo)
+    authSvc := service.NewAuthService("your-secret-key-change-this", 24*time.Hour)
+
+    // Initialize handlers
     bookHandler := handler.NewBookHandler(bookSvc)
+    userHandler := handler.NewUserHandler(userSvc)
+    bookingHandler := handler.NewBookingHandler(bookingSvc)
+    authHandler := handler.NewAuthHandler(authSvc, userSvc)
 
     r := chi.NewRouter()
-    
-    // Add middleware for production-grade observability
+
+    // Global middleware
+    r.Use(middleware.Logger)
+    r.Use(middleware.Recoverer)
     r.Use(handler.RequestIDMiddleware)
-    r.Use(handler.RateLimitMiddleware(100))  // 100 req/sec per IP
     r.Use(handler.LoggingMiddleware)
-    r.Use(handler.RecoveryMiddleware)
-    r.Use(middleware.Compress(5))  // Gzip compression
 
-	r.Get("/swagger/*", httpSwagger.WrapHandler)
-
-
-    // Health checks
+    // Health checks (PUBLIC)
     r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "application/json")
         w.WriteHeader(http.StatusOK)
- 		if _, err := w.Write([]byte(`{"status":"healthy"}`)); err != nil {
-            logger.Printf("failed to write response: %v", err)
-        }
+        _, _ = w.Write([]byte(`{"status":"healthy"}`))
     })
 
     r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
-        // Check database connectivity
         if err := dbpool.Ping(r.Context()); err != nil {
             w.WriteHeader(http.StatusServiceUnavailable)
             _, _ = w.Write([]byte(`{"status":"not_ready"}`))
@@ -87,17 +107,73 @@ func main() {
         _, _ = w.Write([]byte(`{"status":"ready"}`))
     })
 
-    // Books API
-    r.Route("/books", func(r chi.Router) {
-        r.Get("/", bookHandler.List)
-        r.Post("/", bookHandler.Create)
-        r.Get("/{id}", bookHandler.Get)
-        r.Put("/{id}", bookHandler.Update)
-        r.Delete("/{id}", bookHandler.Delete)
+    // Auth endpoints (PUBLIC)
+    r.Post("/auth/register", userHandler.Register)
+    r.Post("/auth/login", authHandler.Login)
+    r.Post("/auth/refresh", authHandler.Refresh)
+    r.Post("/auth/admin-register", userHandler.RegisterAdmin) 
+
+    // User endpoints (PROTECTED - ALL USERS)
+    r.Group(func(r chi.Router) {
+        r.Use(handler.AuthMiddleware(authSvc))
+        r.Get("/users/me", userHandler.GetProfile)
+        r.Put("/users/me", userHandler.UpdateProfile)
     })
 
+    // Admin endpoints (PROTECTED - ADMIN ONLY)
+    r.Group(func(r chi.Router) {
+        r.Use(handler.AuthMiddleware(authSvc))
+        r.Use(handler.AdminMiddleware)
+
+        // Book CRUD (admin only)
+        r.Route("/admin/books", func(r chi.Router) {
+            r.Get("/", bookHandler.List)
+            r.Post("/", bookHandler.Create)
+            r.Get("/{id}", bookHandler.Get)
+            r.Put("/{id}", bookHandler.Update)
+            r.Delete("/{id}", bookHandler.Delete)
+        })
+
+        // User management (admin only)
+        r.Route("/admin/users", func(r chi.Router) {
+            r.Get("/", userHandler.ListUsers)
+            r.Get("/{id}", userHandler.GetUser)
+            r.Delete("/{id}", userHandler.DeleteUser)
+        })
+
+        // View all bookings (admin only)
+        r.Get("/admin/bookings", bookingHandler.ListAllBookings)
+    })
+
+    // Public book viewing
+    r.Get("/books", bookHandler.List)
+
+    // User borrowing endpoints (PROTECTED - ALL USERS)
+    r.Group(func(r chi.Router) {
+        r.Use(handler.AuthMiddleware(authSvc))
+
+        // Book viewing (any user)
+        r.Get("/books/{id}", bookHandler.Get)
+
+        // Borrowing (any user)
+        r.Route("/bookings", func(r chi.Router) {
+            r.Get("/", bookingHandler.GetMyBookings)
+            r.Post("/", bookingHandler.Borrow)
+            r.Get("/{id}", bookingHandler.GetBooking)
+            r.Post("/{id}/return", bookingHandler.Return)
+        })
+    })
+ port := cfg.Port
+if port == "" { port = "8080" }
+if strings.Contains(port, ":") {
+    parts := strings.Split(port, ":")
+    port = parts[len(parts)-1]
+}
+// Force listen on all interfaces
+addr := ":" + port
+
     srv := &http.Server{
-        Addr:         ":" + cfg.Port,
+        Addr:         addr,
         Handler:      r,
         ReadTimeout:  15 * time.Second,
         WriteTimeout: 15 * time.Second,
@@ -106,9 +182,9 @@ func main() {
 
     // Start server
     go func() {
-        logger.Printf("starting server on %s", srv.Addr)
+        log.Printf("starting server on %s", srv.Addr)
         if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            logger.Fatalf("ListenAndServe(): %v", err)
+            log.Fatalf("ListenAndServe(): %v", err)
         }
     }()
 
@@ -116,13 +192,13 @@ func main() {
     stop := make(chan os.Signal, 1)
     signal.Notify(stop, os.Interrupt)
     <-stop
-    logger.Println("shutting down")
-    
+    log.Println("shutting down")
+
     ctxShutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
     defer cancel()
-    
+
     if err := srv.Shutdown(ctxShutdown); err != nil {
-        logger.Fatalf("server shutdown failed: %v", err)
+        log.Fatalf("server shutdown failed: %v", err)
     }
-    logger.Println("server stopped")
+    log.Println("server stopped")
 }
